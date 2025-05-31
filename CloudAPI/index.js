@@ -28,22 +28,32 @@ app.post('/generate-caption', async (req, res) => {
   // ここで毎回OpenAIクライアントを生成
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-  const { imageDescription, model, prompt } = req.body;
-  if (!imageDescription || !model || !prompt) {
-    return res.status(400).json({ error: 'Missing required fields' });
+  const { visionResult, length = 'long' } = req.body;
+  if (!visionResult) {
+    return res.status(400).json({ error: 'Vision result is required' });
   }
 
   try {
+    const prompt = `
+以下の画像解析結果から、${length === 'short' ? '60字' : '100字'}程度の日本語のキャプションを生成してください。
+感情的で魅力的な文章にしてください。
+
+ラベル: ${visionResult.labels.join(', ')}
+感情スコア: ${visionResult.joy}
+${visionResult.text ? `OCRテキスト: ${visionResult.text}` : ''}
+`;
+
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'gpt-4',
       messages: [
         { role: 'system', content: 'あなたは記者です。画像の説明を元に、魅力的なキャプションを生成してください。' },
-        { role: 'user', content: `${prompt}\n\n${imageDescription}` }
+        { role: 'user', content: prompt }
       ],
-      max_tokens: 100
+      max_tokens: 200,
+      temperature: 0.8,
     });
 
-    res.json({ caption: completion.choices[0].message.content });
+    res.json({ copy: completion.choices[0].message.content });
   } catch (error) {
     console.error('OpenAI APIエラー:', error);
     res.status(500).json({ error: error.message });
