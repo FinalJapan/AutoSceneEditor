@@ -9,12 +9,14 @@ import {
   ActivityIndicator,
   PanResponder,
   Dimensions,
+  Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { GestureHandlerRootView, PinchGestureHandler, State } from 'react-native-gesture-handler';
 import { RootStackParamList } from '../types';
 import { analyzeImage } from '../services/visionService';
 import { generateCopy } from '../services/gptService';
@@ -29,18 +31,46 @@ export default function CaptureScreen() {
   const [camera, setCamera] = useState<any>(null);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [zoom, setZoom] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [isDraggingZoom, setIsDraggingZoom] = useState(false);
+  const [baseZoom, setBaseZoom] = useState(1);
 
-  // ズームのPanResponderを設定
-  const panResponder = PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onPanResponderMove: (evt, gestureState) => {
-      const { dy } = gestureState;
-      const screenHeight = Dimensions.get('window').height;
-      const newZoom = Math.max(0, Math.min(1, zoom - dy / screenHeight));
-      setZoom(newZoom);
-    },
-  });
+  // ズームプリセット
+  const zoomLevels = [0.5, 1, 2];
+
+  // ズーム値を文字列に変換
+  const formatZoom = (value: number) => {
+    return value === 1 ? '1x' : value.toFixed(1) + 'x';
+  };
+
+  // ズームレベルの変更
+  const handleZoomChange = (newZoom: number) => {
+    setZoom(Math.max(0.5, Math.min(2, newZoom)));
+  };
+
+  // ピンチジェスチャーのハンドラー
+  const onPinchGestureEvent = (event: any) => {
+    const scale = event.nativeEvent.scale;
+    const newZoom = baseZoom * scale;
+    handleZoomChange(newZoom);
+  };
+
+  // ピンチジェスチャーの状態変更ハンドラー
+  const onPinchHandlerStateChange = (event: any) => {
+    if (event.nativeEvent.oldState === State.ACTIVE) {
+      setBaseZoom(zoom);
+    }
+  };
+
+  // ドラッグでのズーム
+  const handleZoomDrag = (event: any) => {
+    if (!isDraggingZoom) return;
+    const { locationX } = event.nativeEvent;
+    const screenWidth = Dimensions.get('window').width;
+    const zoomRange = 1.5; // 0.5から2.0までの範囲
+    const newZoom = 0.5 + (locationX / screenWidth) * zoomRange;
+    handleZoomChange(newZoom);
+  };
 
   const takePicture = async () => {
     if (camera) {
@@ -145,64 +175,107 @@ export default function CaptureScreen() {
   }
 
   return (
-    <View style={styles.container}>
-      {!imageUri ? (
-        <>
-          <CameraView
-            style={styles.camera}
-            facing="back"
-            ref={(ref) => setCamera(ref)}
-            zoom={zoom}
-            {...panResponder.panHandlers}
-          />
-          <SafeAreaView style={styles.cameraOverlay}>
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={() => navigation.goBack()}
+    <GestureHandlerRootView style={styles.container}>
+      <View style={styles.container}>
+        {!imageUri ? (
+          <>
+            <PinchGestureHandler
+              onGestureEvent={onPinchGestureEvent}
+              onHandlerStateChange={onPinchHandlerStateChange}
             >
-              <Text style={styles.closeButtonText}>✕</Text>
-            </TouchableOpacity>
-            <View style={styles.zoomIndicator}>
-              <Text style={styles.zoomText}>{`${Math.round(zoom * 100)}%`}</Text>
+              <View style={styles.camera}>
+                <CameraView
+                  style={StyleSheet.absoluteFill}
+                  facing="back"
+                  ref={(ref) => setCamera(ref)}
+                  zoom={zoom - 1}
+                />
+              </View>
+            </PinchGestureHandler>
+            <SafeAreaView style={styles.cameraOverlay}>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => navigation.goBack()}
+              >
+                <Text style={styles.closeButtonText}>✕</Text>
+              </TouchableOpacity>
+            </SafeAreaView>
+
+            {/* ズームコントロール */}
+            <View style={styles.zoomControlContainer}>
+              <View style={styles.zoomLevels}>
+                {zoomLevels.map((level) => (
+                  <TouchableOpacity
+                    key={level}
+                    style={[
+                      styles.zoomLevel,
+                      zoom === level && styles.activeZoomLevel,
+                    ]}
+                    onPress={() => {
+                      handleZoomChange(level);
+                      setBaseZoom(level);
+                    }}
+                  >
+                    <Text style={[
+                      styles.zoomLevelText,
+                      zoom === level && styles.activeZoomLevelText
+                    ]}>
+                      {formatZoom(level)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* ズームスライダー */}
+              <Pressable
+                style={styles.zoomSlider}
+                onTouchStart={() => setIsDraggingZoom(true)}
+                onTouchEnd={() => {
+                  setIsDraggingZoom(false);
+                  setBaseZoom(zoom);
+                }}
+                onTouchMove={handleZoomDrag}
+              >
+                <View style={[
+                  styles.zoomSliderTrack,
+                  { width: `${((zoom - 0.5) / 1.5) * 100}%` }
+                ]} />
+              </Pressable>
+            </View>
+
+            <View style={styles.controls}>
+              <TouchableOpacity
+                style={styles.galleryButton}
+                onPress={pickImage}
+              >
+                <Text style={styles.galleryButtonText}>🖼️</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.captureButton}
+                onPress={takePicture}
+              >
+                <View style={styles.captureButtonInner} />
+              </TouchableOpacity>
+              <View style={styles.placeholder} />
+            </View>
+          </>
+        ) : (
+          <SafeAreaView style={styles.safeArea}>
+            <View style={styles.previewContainer}>
+              <Image source={{ uri: imageUri }} style={styles.preview} />
+              <View style={styles.previewControls}>
+                <TouchableOpacity
+                  style={styles.retakeButton}
+                  onPress={() => setImageUri(null)}
+                >
+                  <Text style={styles.buttonText}>撮り直す</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </SafeAreaView>
-          <View style={styles.controls}>
-            <TouchableOpacity
-              style={styles.galleryButton}
-              onPress={pickImage}
-            >
-              <Text style={styles.galleryButtonText}>🖼️</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.captureButton}
-              onPress={takePicture}
-            >
-              <View style={styles.captureButtonInner} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.zoomResetButton}
-              onPress={() => setZoom(0)}
-            >
-              <Text style={styles.zoomResetButtonText}>1x</Text>
-            </TouchableOpacity>
-          </View>
-        </>
-      ) : (
-        <SafeAreaView style={styles.safeArea}>
-          <View style={styles.previewContainer}>
-            <Image source={{ uri: imageUri }} style={styles.preview} />
-            <View style={styles.previewControls}>
-              <TouchableOpacity
-                style={styles.retakeButton}
-                onPress={() => setImageUri(null)}
-              >
-                <Text style={styles.buttonText}>撮り直す</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </SafeAreaView>
-      )}
-    </View>
+        )}
+      </View>
+    </GestureHandlerRootView>
   );
 }
 
@@ -326,30 +399,45 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginTop: 20,
   },
-  zoomIndicator: {
+  zoomControlContainer: {
     position: 'absolute',
-    right: 20,
-    top: 70,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    padding: 8,
-    borderRadius: 15,
-  },
-  zoomText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  zoomResetButton: {
-    width: 50,
-    height: 50,
-    justifyContent: 'center',
+    bottom: 140,
+    left: 0,
+    right: 0,
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 25,
   },
-  zoomResetButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+  zoomLevels: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 20,
+    padding: 4,
+    marginBottom: 10,
+  },
+  zoomLevel: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  activeZoomLevel: {
+    backgroundColor: 'white',
+  },
+  zoomLevelText: {
+    color: 'white',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  activeZoomLevelText: {
+    color: 'black',
+  },
+  zoomSlider: {
+    width: 150,
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  zoomSliderTrack: {
+    height: '100%',
+    backgroundColor: 'white',
   },
 }); 
