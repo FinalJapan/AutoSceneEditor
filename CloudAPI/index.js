@@ -6,20 +6,51 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 
 // Vision APIクライアント
-const vision = new ImageAnnotatorClient();
+let vision;
+try {
+  vision = new ImageAnnotatorClient({
+    keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS
+  });
+  console.log('Vision APIクライアントの初期化成功');
+} catch (error) {
+  console.error('Vision APIクライアントの初期化エラー:', error);
+}
 
 // 画像分析エンドポイント
 app.post('/analyze-image', async (req, res) => {
   try {
-    const { image } = req.body;
-    if (!image) return res.status(400).json({ error: 'Image data is required' });
+    if (!vision) {
+      throw new Error('Vision APIクライアントが初期化されていません');
+    }
 
-    const [result] = await vision.labelDetection({ image: { content: image } });
+    const { image } = req.body;
+    if (!image) {
+      return res.status(400).json({ error: 'Image data is required' });
+    }
+
+    console.log('Vision API リクエスト開始');
+    const [result] = await vision.labelDetection({ 
+      image: { content: image },
+      imageContext: {
+        languageHints: ['ja', 'en']
+      }
+    });
+    console.log('Vision API レスポンス受信');
+
+    if (!result || !result.labelAnnotations) {
+      throw new Error('Vision APIからの応答が不正です');
+    }
+
     const labels = result.labelAnnotations?.map(label => label.description) || [];
     const description = labels.join(', ');
+    console.log('解析結果:', { labelCount: labels.length });
     res.json({ labels, description });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Vision APIエラー詳細:', error);
+    res.status(500).json({ 
+      error: error.message,
+      details: error.details || '詳細なエラー情報がありません'
+    });
   }
 });
 
