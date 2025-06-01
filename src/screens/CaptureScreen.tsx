@@ -30,54 +30,32 @@ export default function CaptureScreen() {
   const [camera, setCamera] = useState<any>(null);
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
-  const [zoom, setZoom] = useState(0);  // 0-1の範囲で管理
-  const [isDraggingZoom, setIsDraggingZoom] = useState(false);
-  const [baseZoom, setBaseZoom] = useState(0);
+  const [currentZoom, setCurrentZoom] = useState(1); // デフォルトは1x
+  const [baseZoom, setBaseZoom] = useState(1); // ピンチ操作の基準値
 
-  // ズームプリセット（UIの表示用）
-  const zoomLevels = [0.5, 1, 2];
+  // ズームプリセット（1xと1.5xのみ）
+  const zoomLevels = [1, 1.5];
 
-  // 内部のズーム値（0-1）をUI表示用の値（0.5-2）に変換
-  const getDisplayZoom = (internalZoom: number) => {
-    return 0.5 + (internalZoom * 1.5);
+  // カメラのズーム値（0-1）に変換
+  const getCameraZoom = (displayZoom: number) => {
+    // 1xを基準（zoom: 0）として計算
+    if (displayZoom === 1) return 0;      // 1x -> 標準ズーム（zoom: 0）
+    if (displayZoom === 1.5) return 0.5;  // 1.5x -> 望遠ズーム（zoom: 0.5）
+    
+    // ピンチ操作用の中間値の計算（1x-1.5xの範囲のみ）
+    return Math.max(0, Math.min(0.5, (displayZoom - 1) * 1));
   };
 
-  // UI表示用の値（0.5-2）を内部のズーム値（0-1）に変換
-  const getInternalZoom = (displayZoom: number) => {
-    return Math.max(0, Math.min(1, (displayZoom - 0.5) / 1.5));
-  };
-
-  // ズーム値を文字列に変換
-  const formatZoom = (value: number) => {
-    const displayValue = getDisplayZoom(value);
-    return displayValue === 1 ? '1x' : displayValue.toFixed(1) + 'x';
-  };
-
-  // ズームレベルの変更（内部値用）
-  const handleZoomChange = (newInternalZoom: number) => {
-    setZoom(Math.max(0, Math.min(1, newInternalZoom)));
-  };
-
-  // プリセットズームの変更（表示値用）
-  const handlePresetZoomChange = (presetZoom: number) => {
-    const newInternalZoom = getInternalZoom(presetZoom);
-    setZoom(newInternalZoom);
-    setBaseZoom(newInternalZoom);
+  // プリセットズームの変更
+  const handlePresetZoomChange = (zoomLevel: number) => {
+    setCurrentZoom(zoomLevel);
+    setBaseZoom(zoomLevel);
   };
 
   // ピンチジェスチャーのハンドラー
   const onPinchGestureEvent = ({ nativeEvent: { scale } }: any) => {
-    const newZoom = Math.max(0, Math.min(1, baseZoom * scale));
-    handleZoomChange(newZoom);
-  };
-
-  // ドラッグでのズーム
-  const handleZoomDrag = (event: any) => {
-    if (!isDraggingZoom) return;
-    const { locationX } = event.nativeEvent;
-    const screenWidth = Dimensions.get('window').width;
-    const newInternalZoom = (locationX / screenWidth);
-    handleZoomChange(newInternalZoom);
+    const newZoom = Math.max(1, Math.min(1.5, baseZoom * scale));
+    setCurrentZoom(newZoom);
   };
 
   const takePicture = async () => {
@@ -195,7 +173,7 @@ export default function CaptureScreen() {
                   style={StyleSheet.absoluteFill}
                   facing="back"
                   ref={(ref) => setCamera(ref)}
-                  zoom={zoom}
+                  zoom={getCameraZoom(currentZoom)}
                 />
               </View>
             </PinchGestureHandler>
@@ -216,35 +194,19 @@ export default function CaptureScreen() {
                     key={level}
                     style={[
                       styles.zoomLevel,
-                      getDisplayZoom(zoom) === level && styles.activeZoomLevel,
+                      Math.abs(currentZoom - level) < 0.1 && styles.activeZoomLevel,
                     ]}
                     onPress={() => handlePresetZoomChange(level)}
                   >
                     <Text style={[
                       styles.zoomLevelText,
-                      getDisplayZoom(zoom) === level && styles.activeZoomLevelText
+                      Math.abs(currentZoom - level) < 0.1 && styles.activeZoomLevelText
                     ]}>
                       {level === 1 ? '1x' : level.toFixed(1) + 'x'}
                     </Text>
                   </TouchableOpacity>
                 ))}
               </View>
-
-              {/* ズームスライダー */}
-              <Pressable
-                style={styles.zoomSlider}
-                onTouchStart={() => setIsDraggingZoom(true)}
-                onTouchEnd={() => {
-                  setIsDraggingZoom(false);
-                  setBaseZoom(zoom);
-                }}
-                onTouchMove={handleZoomDrag}
-              >
-                <View style={[
-                  styles.zoomSliderTrack,
-                  { width: `${zoom * 100}%` }
-                ]} />
-              </Pressable>
             </View>
 
             <View style={styles.controls}>
@@ -415,7 +377,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.3)',
     borderRadius: 20,
     padding: 4,
-    marginBottom: 10,
   },
   zoomLevel: {
     paddingHorizontal: 12,
@@ -432,16 +393,5 @@ const styles = StyleSheet.create({
   },
   activeZoomLevelText: {
     color: 'black',
-  },
-  zoomSlider: {
-    width: 150,
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  zoomSliderTrack: {
-    height: '100%',
-    backgroundColor: 'white',
   },
 }); 
