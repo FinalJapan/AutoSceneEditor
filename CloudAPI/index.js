@@ -29,22 +29,52 @@ app.post('/analyze-image', async (req, res) => {
     }
 
     console.log('Vision API リクエスト開始');
-    const [result] = await vision.labelDetection({ 
+    
+    // 複数の分析を同時に実行
+    const [result] = await vision.annotateImage({
       image: { content: image },
+      features: [
+        { type: 'LABEL_DETECTION', maxResults: 10 },
+        { type: 'LANDMARK_DETECTION', maxResults: 5 },
+        { type: 'LANDSCAPE_DETECTION' },
+        { type: 'IMAGE_PROPERTIES' }
+      ],
       imageContext: {
         languageHints: ['ja', 'en']
       }
     });
+
     console.log('Vision API レスポンス受信');
 
-    if (!result || !result.labelAnnotations) {
-      throw new Error('Vision APIからの応答が不正です');
-    }
-
+    // 結果の集約
     const labels = result.labelAnnotations?.map(label => label.description) || [];
-    const description = labels.join(', ');
-    console.log('解析結果:', { labelCount: labels.length });
-    res.json({ labels, description });
+    const landmarks = result.landmarkAnnotations?.map(landmark => landmark.description) || [];
+    const properties = result.imagePropertiesAnnotation?.dominantColors?.colors || [];
+
+    // 色の情報を抽出
+    const dominantColors = properties.slice(0, 3).map(color => ({
+      red: color.color.red,
+      green: color.color.green,
+      blue: color.color.blue,
+      score: color.score
+    }));
+
+    // 結果をマージ
+    const allDescriptions = [...labels, ...landmarks];
+    const description = allDescriptions.join(', ');
+
+    console.log('解析結果:', { 
+      labelCount: labels.length,
+      landmarkCount: landmarks.length,
+      colorCount: dominantColors.length
+    });
+
+    res.json({ 
+      labels, 
+      landmarks,
+      dominantColors,
+      description 
+    });
   } catch (error) {
     console.error('Vision APIエラー詳細:', error);
     res.status(500).json({ 
